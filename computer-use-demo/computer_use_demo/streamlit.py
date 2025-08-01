@@ -35,6 +35,7 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
     APIProvider.ANTHROPIC: "claude-sonnet-4-20250514",
     APIProvider.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
     APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
+    APIProvider.NEBIUS: "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
 }
 
 
@@ -66,11 +67,19 @@ CLAUDE_4 = ModelConfig(
     has_thinking=True,
 )
 
+MISTRAL_SMALL = ModelConfig(
+    tool_version="computer_use_20250124",
+    max_output_tokens=32_000,
+    default_output_tokens=1024 * 8,
+    has_thinking=False,
+)
+
 MODEL_TO_MODEL_CONF: dict[str, ModelConfig] = {
     "claude-3-7-sonnet-20250219": SONNET_3_7,
     "claude-opus-4@20250508": CLAUDE_4,
     "claude-sonnet-4-20250514": CLAUDE_4,
     "claude-opus-4-20250514": CLAUDE_4,
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503": MISTRAL_SMALL,
 }
 
 CONFIG_DIR = PosixPath("~/.anthropic").expanduser()
@@ -109,9 +118,16 @@ def setup_state():
         st.session_state.messages = []
     if "api_key" not in st.session_state:
         # Try to load API key from file first, then environment
-        st.session_state.api_key = load_from_storage("api_key") or os.getenv(
-            "ANTHROPIC_API_KEY", ""
-        )
+        # Check for different API keys based on provider
+        anthropic_key = load_from_storage("api_key") or os.getenv("ANTHROPIC_API_KEY", "")
+        nebius_key = os.getenv("NEBIUS_API_KEY", "")
+        
+        # Set default based on current provider if available
+        current_provider = os.getenv("API_PROVIDER", "anthropic")
+        if current_provider == "nebius" and nebius_key:
+            st.session_state.api_key = nebius_key
+        else:
+            st.session_state.api_key = anthropic_key
     if "provider" not in st.session_state:
         st.session_state.provider = (
             os.getenv("API_PROVIDER", "anthropic") or APIProvider.ANTHROPIC
@@ -146,11 +162,13 @@ def _reset_model():
 
 
 def _reset_model_conf():
-    model_conf = (
-        MODEL_TO_MODEL_CONF.get(
-            st.session_state.model, SONNET_3_5_NEW
-        )  # Default fallback
-    )
+    # Get model configuration, with MISTRAL_SMALL as fallback for Nebius models
+    if st.session_state.model.startswith("mistralai/"):
+        default_conf = MISTRAL_SMALL
+    else:
+        default_conf = SONNET_3_5_NEW
+    
+    model_conf = MODEL_TO_MODEL_CONF.get(st.session_state.model, default_conf)
 
     # If we're in radio selection mode, use the selected tool version
     if hasattr(st.session_state, "tool_versions"):
@@ -197,6 +215,14 @@ async def main():
         if st.session_state.provider == APIProvider.ANTHROPIC:
             st.text_input(
                 "Anthropic API Key",
+                type="password",
+                key="api_key",
+                on_change=lambda: save_to_storage("api_key", st.session_state.api_key),
+            )
+
+        if st.session_state.provider == APIProvider.NEBIUS:
+            st.text_input(
+                "Nebius API Key",
                 type="password",
                 key="api_key",
                 on_change=lambda: save_to_storage("api_key", st.session_state.api_key),
@@ -372,6 +398,9 @@ def validate_auth(provider: APIProvider, api_key: str | None):
     if provider == APIProvider.ANTHROPIC:
         if not api_key:
             return "Enter your Anthropic API key in the sidebar to continue."
+    if provider == APIProvider.NEBIUS:
+        if not api_key:
+            return "Enter your Nebius API key in the sidebar to continue."
     if provider == APIProvider.BEDROCK:
         import boto3
 

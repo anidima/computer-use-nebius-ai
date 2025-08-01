@@ -56,6 +56,9 @@ RUN git clone --branch v1.5.0 https://github.com/novnc/noVNC.git /opt/noVNC && \
     git clone --branch v0.12.0 https://github.com/novnc/websockify /opt/noVNC/utils/websockify && \
     ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html
 
+# Install dos2unix for line ending conversion
+RUN apt-get update && apt-get install -y dos2unix
+
 # setup user
 ENV USERNAME=computeruse
 ENV HOME=/home/$USERNAME
@@ -93,6 +96,10 @@ RUN python -m pip install -r $HOME/computer_use_demo/requirements.txt
 # setup desktop env & app
 COPY --chown=$USERNAME:$USERNAME image/ $HOME
 COPY --chown=$USERNAME:$USERNAME computer_use_demo/ $HOME/computer_use_demo/
+
+# Convert Windows line endings to Unix and make scripts executable
+RUN find $HOME -type f -name "*.sh" -exec dos2unix {} \; && \
+    chmod +x $HOME/entrypoint.sh $HOME/start_all.sh $HOME/novnc_startup.sh $HOME/xvfb_startup.sh $HOME/x11vnc_startup.sh $HOME/mutter_startup.sh $HOME/tint2_startup.sh
 
 ARG DISPLAY_NUM=1
 ARG HEIGHT=768
