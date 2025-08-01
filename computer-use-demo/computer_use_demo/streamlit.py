@@ -35,7 +35,7 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
     APIProvider.ANTHROPIC: "claude-sonnet-4-20250514",
     APIProvider.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
     APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
-    APIProvider.NEBIUS: "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+    APIProvider.NEBIUS: "Qwen/Qwen2.5-VL-72B-Instruct",
 }
 
 
@@ -74,12 +74,19 @@ MISTRAL_SMALL = ModelConfig(
     has_thinking=False,
 )
 
+QWEN_VL = ModelConfig(
+    tool_version="computer_use_20250124",
+    max_output_tokens=32_000,
+    default_output_tokens=1024 * 8,
+    has_thinking=False,
+)
+
 MODEL_TO_MODEL_CONF: dict[str, ModelConfig] = {
     "claude-3-7-sonnet-20250219": SONNET_3_7,
     "claude-opus-4@20250508": CLAUDE_4,
     "claude-sonnet-4-20250514": CLAUDE_4,
     "claude-opus-4-20250514": CLAUDE_4,
-    "mistralai/Mistral-Small-3.1-24B-Instruct-2503": MISTRAL_SMALL,
+    "Qwen/Qwen2.5-VL-72B-Instruct": QWEN_VL,
 }
 
 CONFIG_DIR = PosixPath("~/.anthropic").expanduser()
@@ -162,8 +169,10 @@ def _reset_model():
 
 
 def _reset_model_conf():
-    # Get model configuration, with MISTRAL_SMALL as fallback for Nebius models
-    if st.session_state.model.startswith("mistralai/"):
+    # Get model configuration, with appropriate fallback for different providers
+    if st.session_state.model.startswith("Qwen/"):
+        default_conf = QWEN_VL
+    elif st.session_state.model.startswith("mistralai/"):
         default_conf = MISTRAL_SMALL
     else:
         default_conf = SONNET_3_5_NEW

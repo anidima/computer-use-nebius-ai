@@ -149,7 +149,7 @@ def _convert_anthropic_tools_to_openai(anthropic_tools: list) -> list[dict]:
             "type": "function",
             "function": {
                 "name": "computer",
-                "description": "Take a screenshot, click, type, scroll, and perform other computer actions. This tool gives you the ability to interact with the screen, keyboard, and mouse of the current computer.",
+                "description": "Take a screenshot, click, type, scroll, and perform other computer actions. This tool gives you the ability to interact with the screen, keyboard, and mouse of the current computer. USE THIS TOOL FOR SCREENSHOTS with action='screenshot'.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -188,7 +188,7 @@ def _convert_anthropic_tools_to_openai(anthropic_tools: list) -> list[dict]:
             "type": "function",
             "function": {
                 "name": "str_replace_editor",
-                "description": "A text editor tool for viewing, creating and editing files. Can view file contents, create new files, edit files, and perform string replacements.",
+                "description": "A text editor tool for viewing, creating and editing TEXT FILES ONLY. Can view file contents, create new files, edit files, and perform string replacements. NEVER use for screenshots or images - use computer tool for screenshots.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -299,14 +299,22 @@ SYSTEM_PROMPT = f"""<SYSTEM_CAPABILITY>
 * You are utilising an Ubuntu virtual machine using {platform.machine()} architecture with internet access.
 * You can feel free to install Ubuntu applications with your bash tool. Use curl instead of wget.
 * To open firefox, please just click on the firefox icon.  Note, firefox-esr is what is installed on your system.
+* ALWAYS take a screenshot FIRST to see what's currently on the desktop before trying to launch applications. Look for application icons, taskbars, or already open windows.
+* TO TAKE A SCREENSHOT: Use the computer tool with action "screenshot", NOT str_replace_editor. Example: computer(action="screenshot")
+* NEVER use str_replace_editor for screenshots - it is only for text files. Screenshots are done with the computer tool.
+* If you see an application icon on the desktop, click on it directly instead of using bash commands to launch it.
 * Using bash tool you can start GUI applications, but you need to set export DISPLAY=:1 and use a subshell. For example "(DISPLAY=:1 xterm &)". GUI apps run with bash tool will appear within your desktop environment, but they may take some time to appear. Take a screenshot to confirm it did.
 * When using your bash tool with commands that are expected to output very large quantities of text, redirect into a tmp file and use str_replace_based_edit_tool or `grep -n -B <lines before> -A <lines after> <query> <filename>` to confirm output.
 * When viewing a page it can be helpful to zoom out so that you can see everything on the page.  Either that, or make sure you scroll down to see everything before deciding something isn't available.
 * When using your computer function calls, they take a while to run and send back to you.  Where possible/feasible, try to chain multiple of these calls all into one function calls request.
+* WORKFLOW: For any task, start with a screenshot to see the current desktop state. If needed applications are visible as icons, click them. Only use bash commands as a fallback if no GUI options are available.
+* IMPORTANT: When a task is completed (e.g., application opened, action performed), explicitly state "Task completed" or "Successfully opened [application]" in your response to indicate completion.
 * The current date is {datetime.today().strftime('%A, %B %d, %Y')}.
 </SYSTEM_CAPABILITY>
 
 <IMPORTANT>
+* CRITICAL: str_replace_editor is ONLY for text files (.txt, .py, .js, etc). NEVER use it for images or screenshots.
+* For screenshots: ALWAYS use computer tool with action="screenshot". 
 * When using Firefox, if a startup wizard appears, IGNORE IT.  Do not even click "skip this step".  Instead, click on the address bar where it says "Search or enter address", and enter the appropriate search term or URL there.
 * If the item you are looking at is a pdf, if after taking a single screenshot of the pdf it seems that you want to read the entire document instead of trying to continue to read the pdf from your screenshots + navigation, determine the URL, use curl to download the pdf, install and use pdftotext to convert it to a text file, and then read that text file directly with your str_replace_based_edit_tool.
 </IMPORTANT>"""
@@ -433,7 +441,7 @@ async def sampling_loop(
                     model=model,
                     messages=openai_messages,
                     tools=openai_tools if openai_tools else None,
-                    tool_choice=None,
+                    tool_choice="required",
                     max_tokens=max_tokens
                 )
 
