@@ -1,183 +1,179 @@
-# Anthropic Computer Use Demo
+# Nebius AI Computer Use Demo
 
-> [!NOTE]
-> Now featuring support for the new Claude 4 models! The latest Claude 4 Sonnet (claude-sonnet-4-20250514) is now the default model, with Claude 4 Opus (claude-opus-4-20250514) also available. These models bring next-generation capabilities with the updated str_replace_based_edit_tool that replaces the previous str_replace_editor tool. The undo_edit command has been removed in this latest version for a more streamlined experience.
+This repository contains an adapted version of Anthropic's Computer Use Demo that has been modified to work with Nebius AI's vision-capable models. The core functionality of the computer use agent has been preserved while replacing the Anthropic API calls with equivalent Nebius AI API calls.
 
-> [!CAUTION]
-> Computer use is a beta feature. Please be aware that computer use poses unique risks that are distinct from standard API features or chat interfaces. These risks are heightened when using computer use to interact with the internet. To minimize risks, consider taking precautions such as:
->
-> 1. Use a dedicated virtual machine or container with minimal privileges to prevent direct system attacks or accidents.
-> 2. Avoid giving the model access to sensitive data, such as account login information, to prevent information theft.
-> 3. Limit internet access to an allowlist of domains to reduce exposure to malicious content.
-> 4. Ask a human to confirm decisions that may result in meaningful real-world consequences as well as any tasks requiring affirmative consent, such as accepting cookies, executing financial transactions, or agreeing to terms of service.
->
-> In some circumstances, Claude will follow commands found in content even if it conflicts with the user's instructions. For example, instructions on webpages or contained in images may override user instructions or cause Claude to make mistakes. We suggest taking precautions to isolate Claude from sensitive data and actions to avoid risks related to prompt injection.
->
-> Finally, please inform end users of relevant risks and obtain their consent prior to enabling computer use in your own products.
+## Overview
 
-This repository helps you get started with computer use on Claude, with reference implementations of:
+The Nebius AI adaptation maintains all the original computer use capabilities:
+- Screenshot capture and visual analysis
+- Mouse control (clicking, dragging, scrolling)
+- Keyboard input simulation
+- File system operations
+- Terminal/bash command execution
+- Browser automation
 
-- Build files to create a Docker container with all necessary dependencies
-- A computer use agent loop using the Anthropic API, Bedrock, or Vertex to access Claude 3.5 Sonnet, Claude 3.7 Sonnet, Claude 4 Sonnet, and Claude 4 Opus models
-- Anthropic-defined computer use tools
-- A streamlit app for interacting with the agent loop
+The main difference is that the agent now uses Nebius AI's `Qwen/Qwen2.5-VL-72B-Instruct` model for vision instead of Claude models.
 
-Please use [this form](https://forms.gle/BT1hpBrqDPDUrCqo7) to provide feedback on the quality of the model responses, the API itself, or the quality of the documentation - we cannot wait to hear from you!
+## Setup instructions
 
-> [!IMPORTANT]
-> The Beta API used in this reference implementation is subject to change. Please refer to the [API release notes](https://docs.anthropic.com/en/release-notes/api) for the most up-to-date information.
+### Prerequisites
+- Docker installed on your system
+- Nebius AI API key (obtain from [Nebius Studio](https://studio.nebius.com/))
 
-> [!IMPORTANT]
-> The components are weakly separated: the agent loop runs in the container being controlled by Claude, can only be used by one session at a time, and must be restarted or reset between sessions if necessary.
+### Environment setup
 
-## Quickstart: running the Docker container
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd anthropic-quickstarts/computer-use-demo
+   ```
 
-### Anthropic API
+2. **Set environment variables**:
+   ```bash
+   export NEBIUS_API_KEY="your_api_key"
+   ```
 
-> [!TIP]
-> You can find your API key in the [Anthropic Console](https://console.anthropic.com/).
+3. **Build and run the Docker container**:
+   ```bash
+   docker build -t nebius-computer-use .
+   
+   docker run \
+       -e NEBIUS_API_KEY=$NEBIUS_API_KEY \
+       -e API_PROVIDER=nebius \
+       -v $HOME/.anthropic:/home/computeruse/.anthropic \
+       -p 5900:5900 \
+       -p 8501:8501 \
+       -p 6080:6080 \
+       -p 8080:8080 \
+       -it nebius-computer-use
+   ```
 
-```bash
-export ANTHROPIC_API_KEY=%your_api_key%
-docker run \
-    -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-    -v $HOME/.anthropic:/home/computeruse/.anthropic \
-    -p 5900:5900 \
-    -p 8501:8501 \
-    -p 6080:6080 \
-    -p 8080:8080 \
-    -it ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
+### Open streamlit interface
+
+http://localhost:8080
+
+
+
+## Adapting Anthropic’s computer-use-demo to the Nebius AI
+
+
+First I studied the structure of the **computer-use-demo** repository:
+
+- `streamlit.py` – the web interface that surfaces configuration options and displays model output.
+- `loop.py` – the core execution engine that defines the system prompt, the `APIProvider` class, and the asynchronous `sampling_loop` responsible for exchanging messages with the language model and dispatching tool calls.
+
+---
+
+### 1 | Integrating Nebius AI
+
+The first thing was to add the `APIProvider.NEBIUS` and create a client for it:
+
+```python
+elif provider == APIProvider.NEBIUS:
+    client = OpenAI(
+        base_url="https://api.studio.nebius.com/v1/",
+        api_key=api_key,
+    )
 ```
 
-Once the container is running, see the [Accessing the demo app](#accessing-the-demo-app) section below for instructions on how to connect to the interface.
+Nebius supplies an OpenAI-compatible SDK, so only the base URL and key management required modification.
 
-### Bedrock
+---
 
-> [!TIP]
-> To use the new Claude 3.7 Sonnet on Bedrock, you first need to [request model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+### 2 | Reconciling message formats
 
-You'll need to pass in AWS credentials with appropriate permissions to use Claude on Bedrock.
-You have a few options for authenticating with Bedrock. See the [boto3 documentation](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html#environment-variables) for more details and options.
+Anthropic relies on structured *Beta* blocks (`BetaTextBlockParam`, `BetaImageBlockParam`, `BetaToolUseBlockParam`, etc.), whereas Nebius follows the OpenAI Chat Completion schema: a sequential list of messages with an optional `tool_calls` array.
 
-#### Option 1: (suggested) Use the host's AWS credentials file and AWS profile
+Obviously, it is necessary to transform queries before feeding them to the model and model responses in order to establish compatibility.
+Ideally, it would be necessary to create an abstraction layer, create adapter classes separately for each API and change sampling_loop to work only with these classes. But for nebius models, a different response request formation, different error handling, etc. will also be needed.
 
-```bash
-export AWS_PROFILE=<your_aws_profile>
-docker run \
-    -e API_PROVIDER=bedrock \
-    -e AWS_PROFILE=$AWS_PROFILE \
-    -e AWS_REGION=us-west-2 \
-    -v $HOME/.aws:/home/computeruse/.aws \
-    -v $HOME/.anthropic:/home/computeruse/.anthropic \
-    -p 5900:5900 \
-    -p 8501:8501 \
-    -p 6080:6080 \
-    -p 8080:8080 \
-    -it ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
+To avoid a broad refactor, I implemented a conversion layer with three functions that operates at the network boundary:
+
+- *_convert_anthropic_messages_to_openai* – flattens Anthropic blocks into OpenAI-style message objects and ensures the system prompt is the first entry.
+- *_convert_anthropic_tools_to_openai* – maps the existing *computer*, *bash*, and *str\_replace\_editor* tool definitions to OpenAI function-calling JSON.
+- *_convert_openai_response_to_anthropic* – restores Nebius responses to Anthropic block format so that downstream logic remains unchanged.
+
+All other files continue to work with the original data structures.
+
+---
+
+### 3 | The main challenges 
+
+#### Selecting a compatible vision model 
+
+In the Nebius AI Studio account I had access to 4 vision models –
+- google/gemma-3-27b-it
+- Qwen/Qwen2-VL-72B-Instruct
+- Qwen/Qwen2.5-VL-72B-Instruct
+- mistralai/Mistral-Small-3.1-24B-Instruct-2503
+
+When trying to access all these models via the suggested code in the API documentation, an error occurred stating that it is impossible to use the auto tool in these models.
+
+```python
+Error code: 400 - {'detail': 'Invalid request. Please check the parameters and try again. Details: This model does not support auto tool, please use tool_choice.'}
+```
+But at the same time, the documentation https://docs.nebius.com/studio/inference/tool-calling states that
+The tool_choice parameter defines the function selection logic. Supported values:
+auto: the most suitable function is selected based on the context of the prompt.
+Specific function name: {"type": "function", "function": {"name": "read_file"}}.
+
+But at the same time, the documentation https://docs.nebius.com/studio/inference/tool-calling states that
+```python
+The tool_choice parameter defines the function selection logic. Supported values:
+auto: the most suitable function is selected based on the context of the prompt.
+Specific function name: {"type": "function", "function": {"name": "read_file"}}.
 ```
 
-Once the container is running, see the [Accessing the demo app](#accessing-the-demo-app) section below for instructions on how to connect to the interface.
+I created tests for all 4 models and tested variants 
+`without tool_choice`, `tool_choice=None`, `tool_choice=“none”`, `tool_choice=“auto”` and `tool_choice=“required”`.
 
-#### Option 2: Use an access key and secret
+As a result, I found out that Qwen/Qwen2.5-VL-72B-Instruct accepts `tool_choice="required"`, `tool_choice="none"`
+Qwen/Qwen2-VL-72B-Instruct accepts `tool_choice="none"`
+And the other two return an error.
 
-```bash
-export AWS_ACCESS_KEY_ID=%your_aws_access_key%
-export AWS_SECRET_ACCESS_KEY=%your_aws_secret_access_key%
-export AWS_SESSION_TOKEN=%your_aws_session_token%
-docker run \
-    -e API_PROVIDER=bedrock \
-    -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-    -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-    -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
-    -e AWS_REGION=us-west-2 \
-    -v $HOME/.anthropic:/home/computeruse/.anthropic \
-    -p 5900:5900 \
-    -p 8501:8501 \
-    -p 6080:6080 \
-    -p 8080:8080 \
-    -it ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
-```
+I left the Qwen/Qwen2.5-VL-72B-Instruct model with the `tool_choice="required"` parameter, but since this value requires the model to select a tool in the response, accessing the model turns into an infinite loop. It is worth noting that the response to the first request is returned relevant and processed correctly. I tested the screenshot and running the command via bash.
 
-Once the container is running, see the [Accessing the demo app](#accessing-the-demo-app) section below for instructions on how to connect to the interface.
+---
 
-### Vertex
+#### Refining the system prompt
 
-You'll need to pass in Google Cloud credentials with appropriate permissions to use Claude on Vertex.
+Several prompt adjustments were necessary to align the model’s behaviour with the original demo:
 
-```bash
-docker build . -t computer-use-demo
-gcloud auth application-default login
-export VERTEX_REGION=%your_vertex_region%
-export VERTEX_PROJECT_ID=%your_vertex_project_id%
-docker run \
-    -e API_PROVIDER=vertex \
-    -e CLOUD_ML_REGION=$VERTEX_REGION \
-    -e ANTHROPIC_VERTEX_PROJECT_ID=$VERTEX_PROJECT_ID \
-    -v $HOME/.config/gcloud/application_default_credentials.json:/home/computeruse/.config/gcloud/application_default_credentials.json \
-    -p 5900:5900 \
-    -p 8501:8501 \
-    -p 6080:6080 \
-    -p 8080:8080 \
-    -it computer-use-demo
-```
+1. Always capture an initial screenshot before reasoning.
+2. Prefer the most direct tool (for example, a mouse click) before resorting to Bash.
 
-Once the container is running, see the [Accessing the demo app](#accessing-the-demo-app) section below for instructions on how to connect to the interface.
+These changes reduced unnecessary tool usage and kept responses concise.
 
-This example shows how to use the Google Cloud Application Default Credentials to authenticate with Vertex.
-You can also set `GOOGLE_APPLICATION_CREDENTIALS` to use an arbitrary credential file, see the [Google Cloud Authentication documentation](https://cloud.google.com/docs/authentication/application-default-credentials#GAC) for more details.
+#### Container reliability
 
-### Accessing the demo app
+To build the Docker image on Windows, I modified the `Dockerfile` to now install `dos2unix` and explicitly set execute permissions for all shell scripts. This prevents runtime errors related to line termination.
+ 
 
-Once the container is running, open your browser to [http://localhost:8080](http://localhost:8080) to access the combined interface that includes both the agent chat and desktop view.
+---
 
-The container stores settings like the API key and custom system prompt in `~/.anthropic/`. Mount this directory to persist these settings between container runs.
+## Outcome
 
-Alternative access points:
+With the conversion layer and prompt adjustments in place, the agent now operates with Nebius AI while retaining the original workflow: it captures a screenshot, reasons about the interface, selects or omits tools as needed, and iterates until the task is completed. 
 
-- Streamlit interface only: [http://localhost:8501](http://localhost:8501)
-- Desktop view only: [http://localhost:6080/vnc.html](http://localhost:6080/vnc.html)
-- Direct VNC connection: `vnc://localhost:5900` (for VNC clients)
+---
 
-## Screen size
+## Further possible steps
 
-Environment variables `WIDTH` and `HEIGHT` can be used to set the screen size. For example:
+- Identify a vision model that can accept `tool_choice="auto"` in the request.
+- Let a separate model handle tool orchestration, while the vision model focuses on screenshot recognition - connect the two so they work together seamlessly.
+- Create a dedicated provider-adapter abstraction to make it easier to plug in additional APIs later on.
 
-```bash
-docker run \
-    -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-    -v $HOME/.anthropic:/home/computeruse/.anthropic \
-    -p 5900:5900 \
-    -p 8501:8501 \
-    -p 6080:6080 \
-    -p 8080:8080 \
-    -e WIDTH=1920 \
-    -e HEIGHT=1080 \
-    -it ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
-```
+---
 
-We do not recommend sending screenshots in resolutions above [XGA/WXGA](https://en.wikipedia.org/wiki/Display_resolution_standards#XGA) to avoid issues related to [image resizing](https://docs.anthropic.com/en/docs/build-with-claude/vision#evaluate-image-size).
-Relying on the image resizing behavior in the API will result in lower model accuracy and slower performance than implementing scaling in your tools directly. The `computer` tool implementation in this project demonstrates how to scale both images and coordinates from higher resolutions to the suggested resolutions.
+## Evaluation 
 
-When implementing computer use yourself, we recommend using XGA resolution (1024x768):
+From the user's point of view, first of all, I would measure whether the agent manages to achieve the requested result - `task completion`. For example, the number of successfully completed tasks to the total number.
 
-- For higher resolutions: Scale the image down to XGA and let the model interact with this scaled version, then map the coordinates back to the original resolution proportionally.
-- For lower resolutions or smaller devices (e.g. mobile devices): Add black padding around the display area until it reaches 1024x768.
+Then the following criteria should be assessed upon successful task completion.
+One of them is the `speed of achieving the result` - there are several factors here: how accurately planning occurs, how quickly the model copes with thinking and processing information, how often repeated calls to the same tools occur, hallucinations of models, the length of the agent's trajectory.
 
-## Development
+`The cost` of successfully completing a task - it is more profitable to use a smaller model if the accuracy and speed of completing the task are proportionate.
 
-```bash
-./setup.sh  # configure venv, install development dependencies, and install pre-commit hooks
-docker build . -t computer-use-demo:local  # manually build the docker image (optional)
-export ANTHROPIC_API_KEY=%your_api_key%
-docker run \
-    -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-    -v $(pwd)/computer_use_demo:/home/computeruse/computer_use_demo/ `# mount local python module for development` \
-    -v $HOME/.anthropic:/home/computeruse/.anthropic \
-    -p 5900:5900 \
-    -p 8501:8501 \
-    -p 6080:6080 \
-    -p 8080:8080 \
-    -it computer-use-demo:local  # can also use ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
-```
+`The accuracy of the tool selection` is also important if the user explicitly indicated this in the request. For example, to solve the example 2 * 2: the LLM model itself can calculate, or it can call the echo $ ((2 * 2)) command, or it can open the calculator and calculate there.
 
-The docker run command above mounts the repo inside the docker image, such that you can edit files from the host. Streamlit is already configured with auto reloading.
+Each of these high-level metrics can be broken down into smaller, more specific metrics so that you can focus on one or the other.
